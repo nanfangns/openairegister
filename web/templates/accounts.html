@@ -1,0 +1,155 @@
+﻿{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+    <h3 style="margin-top:0;margin-bottom:0;">账号列表</h3>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn" onclick="exportAccountsConfig()">导出账号配置</button>
+      <button class="btn warn" onclick="deleteSelectedAccounts()">删除选中</button>
+      <button class="btn err" onclick="deleteAllAccounts()">一键全删</button>
+    </div>
+  </div>
+  <div class="toast mono" id="toast"></div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:50px;"><input id="selectAll" type="checkbox" onchange="toggleSelectAll(this.checked)" /></th>
+        <th>邮箱</th>
+        <th>account_id</th>
+        <th>状态</th>
+        <th>最后成功</th>
+        <th>最后错误</th>
+        <th>操作</th>
+      </tr>
+    </thead>
+    <tbody id="accountsBody"></tbody>
+  </table>
+</section>
+
+<script>
+  function statusTag(status) {
+    const normalized = status || "unknown";
+    const css = ["active", "invalid", "cooldown"].includes(normalized) ? normalized : "";
+    return `<span class="tag ${css}">${normalized}</span>`;
+  }
+
+  function toast(msg, isError = false) {
+    const el = document.getElementById("toast");
+    el.textContent = msg;
+    el.style.color = isError ? "#ff6f7d" : "#52ffa1";
+  }
+
+  async function api(url, options = {}) {
+    const res = await fetch(url, {
+      headers: { "Content-Type": "application/json" },
+      ...options,
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || `HTTP ${res.status}`);
+    }
+    return res.json();
+  }
+
+  function exportAccountsConfig() {
+    window.location.href = "/api/accounts/export";
+    toast("已开始下载账号配置");
+  }
+
+  async function refreshAccount(accountId) {
+    try {
+      await api(`/api/refresh/account/${accountId}`, { method: "POST" });
+      toast(`刷新成功: ${accountId}`);
+      await loadAccounts();
+    } catch (err) {
+      toast(String(err), true);
+    }
+  }
+
+  async function deleteOneAccount(accountId) {
+    if (!accountId) return;
+    if (!confirm(`确认删除账号 ${accountId} 吗？`)) return;
+    try {
+      await api(`/api/accounts/${encodeURIComponent(accountId)}`, { method: "DELETE" });
+      toast(`删除成功: ${accountId}`);
+      await loadAccounts();
+    } catch (err) {
+      toast(String(err), true);
+    }
+  }
+
+  function selectedAccountIds() {
+    return Array.from(document.querySelectorAll(".account-selector:checked"))
+      .map((el) => el.value)
+      .filter(Boolean);
+  }
+
+  function toggleSelectAll(checked) {
+    document.querySelectorAll(".account-selector").forEach((el) => {
+      el.checked = checked;
+    });
+  }
+
+  async function deleteSelectedAccounts() {
+    const ids = selectedAccountIds();
+    if (!ids.length) {
+      toast("请先勾选要删除的账号", true);
+      return;
+    }
+    if (!confirm(`确认批量删除 ${ids.length} 个账号吗？`)) return;
+
+    try {
+      const data = await api("/api/accounts/delete-batch", {
+        method: "POST",
+        body: JSON.stringify({ account_ids: ids }),
+      });
+      toast(`批量删除完成: deleted=${data.deleted || 0}, not_found=${(data.not_found || []).length}`);
+      await loadAccounts();
+    } catch (err) {
+      toast(String(err), true);
+    }
+  }
+
+  async function deleteAllAccounts() {
+    if (!confirm("确认一键全删所有账号吗？该操作不可恢复。")) return;
+    try {
+      const data = await api("/api/accounts/delete-all", { method: "POST" });
+      toast(`已全删: ${data.deleted || 0} 个账号`);
+      await loadAccounts();
+    } catch (err) {
+      toast(String(err), true);
+    }
+  }
+
+  async function loadAccounts() {
+    const data = await api("/api/accounts");
+    const body = document.getElementById("accountsBody");
+    document.getElementById("selectAll").checked = false;
+
+    if (!data.accounts.length) {
+      body.innerHTML = `<tr><td colspan="7" class="muted">暂无账号</td></tr>`;
+      return;
+    }
+
+    body.innerHTML = data.accounts.map((a) => {
+      const accountIdLiteral = JSON.stringify(a.account_id || "");
+      return `
+      <tr>
+        <td><input class="account-selector" type="checkbox" value="${a.account_id || ""}" /></td>
+        <td>${a.email || "-"}</td>
+        <td class="mono">${a.account_id || "-"}</td>
+        <td>${statusTag(a.status)}</td>
+        <td class="mono">${a.last_success_at || "-"}</td>
+        <td class="mono">${a.last_error || "-"}</td>
+        <td style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button class="btn" onclick='refreshAccount(${accountIdLiteral})'>刷新</button>
+          <button class="btn err" onclick='deleteOneAccount(${accountIdLiteral})'>删除</button>
+        </td>
+      </tr>`;
+    }).join("");
+  }
+
+  loadAccounts();
+  setInterval(loadAccounts, 20000);
+</script>
+{% endblock %}

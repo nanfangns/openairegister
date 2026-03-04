@@ -1,0 +1,12 @@
+services:
+  app:
+    build: .
+    container_name: openai-register-ops
+    command: uvicorn web.app:app --host 0.0.0.0 --port 8000
+    environment:
+      DATA_DIR: /app/data
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

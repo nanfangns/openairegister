@@ -1,0 +1,39 @@
+﻿{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <h3 style="margin-top:0;">最近日志 (最多1000条保留)</h3>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+    <button class="btn" onclick="loadLogs()">刷新</button>
+    <button class="btn" onclick="setLimit(100)">100</button>
+    <button class="btn" onclick="setLimit(300)">300</button>
+    <button class="btn" onclick="setLimit(800)">800</button>
+  </div>
+  <pre class="mono" id="logs">loading...</pre>
+</section>
+
+<script>
+  let currentLimit = 200;
+
+  function setLimit(n) {
+    currentLimit = n;
+    loadLogs();
+  }
+
+  async function api(url) {
+    const res = await fetch(url);
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || `HTTP ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async function loadLogs() {
+    const data = await api(`/api/logs?limit=${currentLimit}`);
+    document.getElementById("logs").textContent = JSON.stringify(data.logs, null, 2);
+  }
+
+  loadLogs();
+  setInterval(loadLogs, 15000);
+</script>
+{% endblock %}

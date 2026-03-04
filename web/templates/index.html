@@ -1,0 +1,156 @@
+﻿{% extends "base.html" %}
+{% block content %}
+<section class="grid cols-3" style="margin-bottom:14px;">
+  <article class="panel">
+    <div class="muted">活跃账号</div>
+    <div id="activeCount" style="font-size:2rem;font-weight:700;">-</div>
+  </article>
+  <article class="panel">
+    <div class="muted">目标池大小</div>
+    <div id="targetCount" style="font-size:2rem;font-weight:700;">-</div>
+  </article>
+  <article class="panel">
+    <div class="muted">调度器状态</div>
+    <div id="schedulerState" style="font-size:1.2rem;font-weight:600;">-</div>
+  </article>
+</section>
+
+<section class="grid cols-2">
+  <article class="panel">
+    <h3 style="margin-top:0;">任务控制</h3>
+    <div class="grid" style="grid-template-columns:1fr 1fr 1fr;">
+      <button class="btn" onclick="manualRegisterOnce()">手动注册 1 个</button>
+      <button class="btn warn" onclick="manualRefill()">手动补池到目标值</button>
+      <button class="btn" onclick="exportAccountsConfig()">导出账号配置</button>
+    </div>
+
+    <div class="grid" style="margin-top:12px;grid-template-columns:1fr 1fr;">
+      <label class="panel" style="padding:10px;">
+        <input id="autoRegister" type="checkbox" onchange="toggleJob('auto_register', this.checked)"> 自动注册
+      </label>
+      <label class="panel" style="padding:10px;">
+        <input id="autoRefresh" type="checkbox" onchange="toggleJob('auto_refresh', this.checked)"> 自动刷新(401/403)
+      </label>
+    </div>
+
+    <div class="toast mono" id="actionToast"></div>
+  </article>
+
+  <article class="panel">
+    <h3 style="margin-top:0;">运行配置</h3>
+    <div class="grid" style="grid-template-columns:1fr 1fr;">
+      <label>pool_target
+        <input id="poolTarget" type="number" min="1" />
+      </label>
+      <label>register_concurrency
+        <input id="registerConcurrency" type="number" min="1" />
+      </label>
+    </div>
+
+    <label style="display:block;margin-top:10px;">proxy
+      <input id="proxy" type="text" placeholder="http://127.0.0.1:7890" />
+    </label>
+
+    <button class="btn" style="margin-top:12px;" onclick="saveConfig()">保存配置</button>
+  </article>
+</section>
+
+<section class="panel" style="margin-top:14px;">
+  <h3 style="margin-top:0;">最近事件</h3>
+  <pre class="mono" id="recentEvents">loading...</pre>
+</section>
+
+<script>
+  async function api(url, options = {}) {
+    const res = await fetch(url, {
+      headers: { "Content-Type": "application/json" },
+      ...options,
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      throw new Error(text || `HTTP ${res.status}`);
+    }
+    return text ? JSON.parse(text) : {};
+  }
+
+  function toast(msg, isError = false) {
+    const el = document.getElementById("actionToast");
+    el.textContent = msg;
+    el.style.color = isError ? "#ff6f7d" : "#52ffa1";
+  }
+
+  async function loadStatus() {
+    const data = await api("/api/status");
+    document.getElementById("activeCount").textContent = data.pool.active;
+    document.getElementById("targetCount").textContent = data.pool.target;
+    document.getElementById("schedulerState").textContent = data.scheduler.scheduler_running ? "running" : "stopped";
+
+    document.getElementById("autoRegister").checked = !!data.config.auto_register_enabled;
+    document.getElementById("autoRefresh").checked = !!data.config.auto_refresh_enabled;
+    document.getElementById("poolTarget").value = data.config.pool_target;
+    document.getElementById("registerConcurrency").value = data.config.register_concurrency;
+    document.getElementById("proxy").value = data.config.proxy || "";
+
+    document.getElementById("recentEvents").textContent = JSON.stringify(data.last_events, null, 2);
+  }
+
+  async function manualRegisterOnce() {
+    try {
+      const data = await api("/api/register/once", { method: "POST" });
+      toast(data.ok ? "注册任务执行完成" : "注册任务失败", !data.ok);
+      await loadStatus();
+    } catch (err) {
+      toast(String(err), true);
+    }
+  }
+
+  async function manualRefill() {
+    try {
+      const data = await api("/api/register/refill", { method: "POST" });
+      toast(`补池完成: +${data.registered || 0}, fail=${data.failed || 0}`);
+      await loadStatus();
+    } catch (err) {
+      toast(String(err), true);
+    }
+  }
+
+  function exportAccountsConfig() {
+    window.location.href = "/api/accounts/export";
+    toast("已开始下载账号配置");
+  }
+
+  async function toggleJob(job, enabled) {
+    try {
+      await api("/api/jobs/toggle", {
+        method: "POST",
+        body: JSON.stringify({ job, enabled }),
+      });
+      toast(`${job} 已${enabled ? "开启" : "关闭"}`);
+      await loadStatus();
+    } catch (err) {
+      toast(String(err), true);
+    }
+  }
+
+  async function saveConfig() {
+    const payload = {
+      pool_target: Number(document.getElementById("poolTarget").value),
+      register_concurrency: Number(document.getElementById("registerConcurrency").value),
+      proxy: document.getElementById("proxy").value || null,
+    };
+    try {
+      await api("/api/config", {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      });
+      toast("配置已保存");
+      await loadStatus();
+    } catch (err) {
+      toast(String(err), true);
+    }
+  }
+
+  loadStatus();
+  setInterval(loadStatus, 15000);
+</script>
+{% endblock %}

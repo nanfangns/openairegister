@@ -1,0 +1,184 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ title }} - OpenAI Register Ops</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg-a: #0c1224;
+      --bg-b: #112d35;
+      --panel: rgba(255, 255, 255, 0.08);
+      --panel-strong: rgba(255, 255, 255, 0.14);
+      --line: rgba(255, 255, 255, 0.2);
+      --text: #eaf5ff;
+      --muted: #b7c8d6;
+      --ok: #52ffa1;
+      --warn: #ffce5c;
+      --err: #ff6f7d;
+      --accent: #4be2ff;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      color: var(--text);
+      font-family: "Space Grotesk", sans-serif;
+      background: radial-gradient(circle at 10% 20%, #173f73 0%, transparent 35%),
+                  radial-gradient(circle at 90% 15%, #145a61 0%, transparent 32%),
+                  linear-gradient(135deg, var(--bg-a), var(--bg-b));
+      min-height: 100vh;
+    }
+
+    .shell {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 24px 16px 40px;
+    }
+
+    .topbar {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
+
+    .brand {
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      font-size: 1.15rem;
+    }
+
+    .nav {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .nav a {
+      text-decoration: none;
+      color: var(--text);
+      border: 1px solid var(--line);
+      padding: 8px 12px;
+      border-radius: 999px;
+      transition: transform 120ms ease, border-color 120ms ease;
+    }
+
+    .nav a:hover {
+      border-color: var(--accent);
+      transform: translateY(-1px);
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 16px;
+      backdrop-filter: blur(8px);
+    }
+
+    .muted { color: var(--muted); }
+
+    .mono {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.9rem;
+    }
+
+    .grid {
+      display: grid;
+      gap: 14px;
+    }
+
+    .btn {
+      border: 1px solid var(--line);
+      background: var(--panel-strong);
+      color: var(--text);
+      padding: 9px 14px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-family: inherit;
+      font-weight: 500;
+    }
+
+    .btn:hover { border-color: var(--accent); }
+
+    .btn.warn { border-color: rgba(255, 206, 92, 0.5); }
+
+    .btn.err { border-color: rgba(255, 111, 125, 0.5); }
+
+    input[type="number"], input[type="text"], textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text);
+      border-radius: 10px;
+      padding: 8px 10px;
+      font-family: inherit;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.92rem;
+    }
+
+    th, td {
+      padding: 10px 8px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      font-size: 0.8rem;
+    }
+
+    .tag.active { color: var(--ok); border-color: rgba(82, 255, 161, 0.55); }
+    .tag.invalid { color: var(--err); border-color: rgba(255, 111, 125, 0.55); }
+    .tag.cooldown { color: var(--warn); border-color: rgba(255, 206, 92, 0.55); }
+
+    pre {
+      background: rgba(0, 0, 0, 0.2);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px;
+      overflow: auto;
+      max-height: 520px;
+    }
+
+    .toast {
+      margin-top: 10px;
+      font-size: 0.92rem;
+      min-height: 1.2em;
+    }
+
+    @media (min-width: 900px) {
+      .grid.cols-2 { grid-template-columns: 1fr 1fr; }
+      .grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">OpenAI Register Ops</div>
+      <nav class="nav">
+        <a href="/">总览</a>
+        <a href="/accounts">账号池</a>
+        <a href="/logs">日志</a>
+      </nav>
+    </header>
+    {% block content %}{% endblock %}
+  </div>
+</body>
+</html>
