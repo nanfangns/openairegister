@@ -13,7 +13,7 @@ def dashboard(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request=request,
         name="index.html",
-        context={"title": "控制面板总览"},
+        context={"title": "控制面板总览", "active_page": "dashboard"},
     )
 
 
@@ -23,7 +23,7 @@ def accounts_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request=request,
         name="accounts.html",
-        context={"title": "账号池"},
+        context={"title": "账号池", "active_page": "accounts"},
     )
 
 
@@ -33,5 +33,5 @@ def logs_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request=request,
         name="logs.html",
-        context={"title": "事件日志"},
+        context={"title": "事件日志", "active_page": "logs"},
     )

@@ -1,155 +1,440 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
 {% block content %}
-<section class="panel">
-  <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
-    <h3 style="margin-top:0;margin-bottom:0;">账号列表</h3>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;">
-      <button class="btn" onclick="exportAccountsConfig()">导出账号配置</button>
-      <button class="btn warn" onclick="deleteSelectedAccounts()">删除选中</button>
-      <button class="btn err" onclick="deleteAllAccounts()">一键全删</button>
+<section class="panel animate-in">
+  <div class="panel-header">
+    <h3>账号列表</h3>
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+      <span class="badge" style="background:var(--ok-dim);color:var(--ok);" id="activeBadge">0 活跃</span>
+      <span class="badge" style="background:var(--err-dim);color:var(--err);" id="invalidBadge">0 失效</span>
+      <span class="badge" style="background:var(--warn-dim);color:var(--warn);" id="cooldownBadge">0 冷却</span>
     </div>
   </div>
-  <div class="toast mono" id="toast"></div>
-  <table>
-    <thead>
-      <tr>
-        <th style="width:50px;"><input id="selectAll" type="checkbox" onchange="toggleSelectAll(this.checked)" /></th>
-        <th>邮箱</th>
-        <th>account_id</th>
-        <th>状态</th>
-        <th>最后成功</th>
-        <th>最后错误</th>
-        <th>操作</th>
-      </tr>
-    </thead>
-    <tbody id="accountsBody"></tbody>
-  </table>
+
+  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px;" class="toolbar-wrap">
+    <div class="search-box" style="flex:1;min-width:220px;">
+      <input id="searchInput" type="search" placeholder="搜索邮箱或账号ID... (按 / 聚焦)" oninput="debouncedFilter()" />
+    </div>
+    <div class="sep"></div>
+    <div class="filter-pills">
+      <button class="filter-pill active" data-filter="all" onclick="setStatusFilter('all', this)">全部</button>
+      <button class="filter-pill" data-filter="active" onclick="setStatusFilter('active', this)">活跃</button>
+      <button class="filter-pill" data-filter="invalid" onclick="setStatusFilter('invalid', this)">失效</button>
+      <button class="filter-pill" data-filter="cooldown" onclick="setStatusFilter('cooldown', this)">冷却</button>
+    </div>
+    <div class="sep"></div>
+    <button class="btn btn-sm" onclick="exportAccountsConfig()" aria-label="导出所有账号为ZIP">
+      <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="vertical-align:-1px;margin-right:2px;"><path d="M6 1v7M2 4l4 4 4-4"/><path d="M1 10v1a1 1 0 001 1h8a1 1 0 001-1v-1"/></svg>
+      ZIP
+    </button>
+    <button class="btn btn-sm" onclick="exportCSV()" aria-label="导出所有账号为CSV">CSV</button>
+    <button class="btn btn-sm" onclick="exportSelectedCSV()" aria-label="导出选中的账号">导出选中</button>
+    <div class="sep"></div>
+    <button class="btn btn-sm" onclick="invertSelection()" aria-label="反选当前勾选">反选</button>
+    <button class="btn btn-sm warn" onclick="deleteSelectedAccounts()" id="btnDeleteSelected" aria-label="删除选中的账号">
+      删除 <span class="badge" style="background:var(--warn-dim);color:var(--warn);margin-left:4px;" id="selectedCount">0</span>
+    </button>
+    <button class="btn btn-sm err" onclick="deleteAllAccounts()" aria-label="删除所有账号，不可恢复">全删</button>
+  </div>
+
+  <div style="overflow-x:auto;">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:44px;"><input id="selectAll" type="checkbox" onchange="toggleSelectAll(this.checked)" style="cursor:pointer;" /></th>
+          <th class="sortable" onclick="sortBy('email')" style="min-width:180px;">邮箱 <span class="sort-arrow" id="sort-email"></span></th>
+          <th>Account ID</th>
+          <th class="sortable" onclick="sortBy('status')" style="min-width:90px;">状态 <span class="sort-arrow" id="sort-status"></span></th>
+          <th class="sortable" onclick="sortBy('last_success_at')" style="min-width:100px;">最后成功 <span class="sort-arrow" id="sort-last_success_at"></span></th>
+          <th style="min-width:150px;">最后错误</th>
+          <th style="width:130px;">操作</th>
+        </tr>
+      </thead>
+      <tbody id="accountsBody"></tbody>
+    </table>
+  </div>
+  <div class="muted mono" style="font-size:0.75rem;margin-top:10px;text-align:right;" id="accountCount"></div>
 </section>
 
 <script>
+  let allAccounts = [];
+  let sortField = null;
+  let sortAsc = true;
+  let currentStatusFilter = "all";
+
+  var previousStatuses = {};
+
   function statusTag(status) {
-    const normalized = status || "unknown";
-    const css = ["active", "invalid", "cooldown"].includes(normalized) ? normalized : "";
-    return `<span class="tag ${css}">${normalized}</span>`;
+    const n = status || "unknown";
+    const css = ["active", "invalid", "cooldown"].includes(n) ? n : "";
+    return `<span class="tag ${css}">${n}</span>`;
   }
 
-  function toast(msg, isError = false) {
-    const el = document.getElementById("toast");
-    el.textContent = msg;
-    el.style.color = isError ? "#ff6f7d" : "#52ffa1";
+  function setStatusFilter(filter, btn) {
+    currentStatusFilter = filter;
+    document.querySelectorAll(".filter-pill").forEach(function(p) { p.classList.remove("active"); });
+    if (btn) btn.classList.add("active");
+    filterAccounts();
   }
 
-  async function api(url, options = {}) {
-    const res = await fetch(url, {
+  function api(url, options = {}) {
+    return fetch(url, {
       headers: { "Content-Type": "application/json" },
       ...options,
+    }).then(async res => {
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `HTTP ${res.status}`);
+      }
+      return res.json();
     });
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(text || `HTTP ${res.status}`);
+  }
+
+  function sortBy(field) {
+    if (sortField === field) {
+      sortAsc = !sortAsc;
+    } else {
+      sortField = field;
+      sortAsc = true;
     }
-    return res.json();
+    document.querySelectorAll(".sort-arrow").forEach(el => el.textContent = "");
+    const arrow = document.getElementById("sort-" + field);
+    if (arrow) arrow.textContent = sortAsc ? " ▲" : " ▼";
+    filterAccounts();
+  }
+
+  function getSortedFiltered() {
+    let list = allAccounts.slice();
+    const q = document.getElementById("searchInput").value.toLowerCase();
+    /* Status filter */
+    if (currentStatusFilter !== "all") {
+      list = list.filter(a => a.status === currentStatusFilter);
+    }
+    /* Text search */
+    if (q) {
+      list = list.filter(a =>
+        (a.email || "").toLowerCase().includes(q) ||
+        (a.account_id || "").toLowerCase().includes(q) ||
+        (a.status || "").toLowerCase().includes(q)
+      );
+    }
+    if (sortField) {
+      list.sort((a, b) => {
+        let va = a[sortField] || "";
+        let vb = b[sortField] || "";
+        if (sortField === "last_success_at") {
+          va = va ? new Date(va).getTime() : 0;
+          vb = vb ? new Date(vb).getTime() : 0;
+          return sortAsc ? va - vb : vb - va;
+        }
+        va = String(va).toLowerCase();
+        vb = String(vb).toLowerCase();
+        return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+      });
+    }
+    return list;
   }
 
   function exportAccountsConfig() {
     window.location.href = "/api/accounts/export";
-    toast("已开始下载账号配置");
+    showToast("已开始下载账号配置", "ok");
+  }
+
+  function exportCSV() {
+    if (!allAccounts.length) { showToast("暂无数据可导出", "err"); return; }
+    const header = "邮箱,Account ID,状态,最后成功,最后错误\n";
+    const rows = allAccounts.map(a =>
+      `${a.email || ""},${a.account_id || ""},${a.status || ""},${a.last_success_at || ""},${(a.last_error || "").replace(/,/g, ";")}`
+    ).join("\n");
+    const blob = new Blob(["﻿" + header + rows], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "accounts.csv"; a.click();
+    URL.revokeObjectURL(url);
+    showToast("CSV 已导出", "ok");
+  }
+
+  function exportSelectedCSV() {
+    var ids = selectedAccountIds();
+    if (!ids.length) { showToast("请先勾选要导出的账号", "err"); return; }
+    var selected = allAccounts.filter(function(a) { return ids.indexOf(a.account_id) !== -1; });
+    var header = "邮箱,Account ID,状态,最后成功,最后错误\n";
+    var rows = selected.map(function(a) {
+      return (a.email || "") + "," + (a.account_id || "") + "," + (a.status || "") + "," + (a.last_success_at || "") + "," + (a.last_error || "").replace(/,/g, ";");
+    }).join("\n");
+    var blob = new Blob(["﻿" + header + rows], { type: "text/csv;charset=utf-8" });
+    var url = URL.createObjectURL(blob);
+    var el = document.createElement("a");
+    el.href = url; el.download = "accounts-selected.csv"; el.click();
+    URL.revokeObjectURL(url);
+    showToast("已导出 " + selected.length + " 个选中账号", "ok");
+  }
+
+  function showAccountDetail(accountId) {
+    var acc = allAccounts.find(function(a) { return a.account_id === accountId; });
+    if (!acc) return;
+    var overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    var st = acc.status || "unknown";
+    var stColor = st === "active" ? "var(--ok)" : st === "invalid" ? "var(--err)" : "var(--warn)";
+    var errColor = acc.last_error ? "var(--err)" : "var(--muted)";
+    var html = '<div class="modal-box" style="max-width:540px;">';
+    html += '<h4>账号详情</h4>';
+    html += '<div style="display:grid;grid-template-columns:100px 1fr;gap:10px 14px;font-size:0.85rem;margin-bottom:20px;">';
+    html += '<span class="muted" style="font-weight:500;">邮箱</span><span class="mono" style="word-break:break-all;">' + (acc.email || "-") + '</span>';
+    html += '<span class="muted" style="font-weight:500;">Account ID</span><span class="mono" style="word-break:break-all;opacity:0.85;font-size:0.80rem;">' + (acc.account_id || "-") + '</span>';
+    html += '<span class="muted" style="font-weight:500;">状态</span><span style="color:' + stColor + ';font-weight:600;">' + st + '</span>';
+    html += '<span class="muted" style="font-weight:500;">最后成功</span><span class="mono">' + (acc.last_success_at || "-") + '</span>';
+    html += '<span class="muted" style="font-weight:500;">最后错误</span><span class="mono" style="color:' + errColor + ';word-break:break-all;font-size:0.80rem;">' + (acc.last_error || "无") + '</span>';
+    html += '</div><div class="modal-actions">';
+    html += '<button class="btn btn-sm" id="modalCopyEmail">复制邮箱</button>';
+    html += '<button class="btn btn-sm" id="modalCopyId">复制 ID</button>';
+    html += '<button class="btn btn-sm" id="modalCloseBtn">关闭</button>';
+    html += '</div></div>';
+    overlay.innerHTML = html;
+    document.body.appendChild(overlay);
+    overlay.querySelector("#modalCloseBtn").onclick = function() { overlay.remove(); };
+    overlay.querySelector("#modalCopyEmail").onclick = function() { copyText(acc.email, this); };
+    overlay.querySelector("#modalCopyId").onclick = function() { copyText(acc.account_id, this); };
+    overlay.addEventListener("click", function(e) { if (e.target === overlay) overlay.remove(); });
   }
 
   async function refreshAccount(accountId) {
     try {
       await api(`/api/refresh/account/${accountId}`, { method: "POST" });
-      toast(`刷新成功: ${accountId}`);
+      showToast(`刷新成功: ${accountId.slice(0, 8)}...`, "ok");
       await loadAccounts();
     } catch (err) {
-      toast(String(err), true);
+      showToast(String(err), "err");
     }
   }
 
   async function deleteOneAccount(accountId) {
     if (!accountId) return;
-    if (!confirm(`确认删除账号 ${accountId} 吗？`)) return;
+    const ok = await showConfirm("删除账号", `确认删除账号 ${accountId.slice(0, 12)}... 吗？`);
+    if (!ok) return;
     try {
       await api(`/api/accounts/${encodeURIComponent(accountId)}`, { method: "DELETE" });
-      toast(`删除成功: ${accountId}`);
+      showToast("删除成功", "ok");
       await loadAccounts();
     } catch (err) {
-      toast(String(err), true);
+      showToast(String(err), "err");
     }
   }
 
   function selectedAccountIds() {
     return Array.from(document.querySelectorAll(".account-selector:checked"))
-      .map((el) => el.value)
+      .map(el => el.value)
       .filter(Boolean);
   }
 
   function toggleSelectAll(checked) {
-    document.querySelectorAll(".account-selector").forEach((el) => {
+    document.querySelectorAll(".account-selector").forEach(el => {
       el.checked = checked;
     });
+    updateSelectedCount();
+  }
+
+  function invertSelection() {
+    document.querySelectorAll(".account-selector").forEach(el => {
+      el.checked = !el.checked;
+    });
+    updateSelectedCount();
+  }
+
+  function updateSelectedCount() {
+    var count = selectedAccountIds().length;
+    var el = document.getElementById("selectedCount");
+    el.textContent = count;
+    el.style.display = count > 0 ? "" : "none";
   }
 
   async function deleteSelectedAccounts() {
     const ids = selectedAccountIds();
-    if (!ids.length) {
-      toast("请先勾选要删除的账号", true);
-      return;
-    }
-    if (!confirm(`确认批量删除 ${ids.length} 个账号吗？`)) return;
-
+    if (!ids.length) { showToast("请先勾选要删除的账号", "err"); return; }
+    const ok = await showConfirm("批量删除", `确认批量删除 ${ids.length} 个账号吗？`);
+    if (!ok) return;
     try {
       const data = await api("/api/accounts/delete-batch", {
         method: "POST",
         body: JSON.stringify({ account_ids: ids }),
       });
-      toast(`批量删除完成: deleted=${data.deleted || 0}, not_found=${(data.not_found || []).length}`);
+      showToast(`批量删除完成: ${data.deleted || 0} 个`, "ok");
       await loadAccounts();
     } catch (err) {
-      toast(String(err), true);
+      showToast(String(err), "err");
     }
   }
 
   async function deleteAllAccounts() {
-    if (!confirm("确认一键全删所有账号吗？该操作不可恢复。")) return;
+    const ok = await showConfirm("一键全删", "确认删除所有账号吗？该操作不可恢复。<br><small style='color:var(--muted);'>请在3秒内再次确认</small>");
+    if (!ok) return;
+    showToast("正在删除...", "ok");
     try {
       const data = await api("/api/accounts/delete-all", { method: "POST" });
-      toast(`已全删: ${data.deleted || 0} 个账号`);
+      showToast(`已全删: ${data.deleted || 0} 个账号`, "ok");
       await loadAccounts();
     } catch (err) {
-      toast(String(err), true);
+      showToast(String(err), "err");
+    }
+  }
+
+  function formatTime(ts) {
+    if (!ts) return "-";
+    const d = new Date(ts);
+    if (isNaN(d)) return ts;
+    return d.toLocaleString("zh-CN", { hour12: false });
+  }
+
+  function renderTable(accounts) {
+    const body = document.getElementById("accountsBody");
+    document.getElementById("selectAll").checked = false;
+    const query = document.getElementById("searchInput").value.toLowerCase();
+
+    if (!accounts.length) {
+      var isFiltered = query.length > 0;
+      body.innerHTML = '<tr><td colspan="7" class="muted" style="text-align:center;padding:60px 20px;">' +
+        '<div style="font-size:2.5rem;margin-bottom:12px;opacity:0.2;">' + (isFiltered ? '⌕' : '∅') + '</div>' +
+        '<div style="font-size:0.95rem;margin-bottom:6px;color:var(--text);font-weight:500;">' + (isFiltered ? '没有匹配的账号' : '暂无账号') + '</div>' +
+        '<div style="font-size:0.82rem;">' + (isFiltered ? '尝试其他搜索关键词' : '通过注册功能添加账号') + '</div>' +
+        '</td></tr>';
+      return;
+    }
+
+    function highlight(text) {
+      if (!query || !text) return text;
+      var idx = text.toLowerCase().indexOf(query);
+      if (idx === -1) return text;
+      return text.substring(0, idx) + '<mark style="background:rgba(75,226,255,0.20);color:var(--text);border-radius:3px;padding:0 2px;">' + text.substring(idx, idx + query.length) + '</mark>' + text.substring(idx + query.length);
+    }
+
+    function relativeTime(ts) {
+      if (!ts) return "-";
+      var diff = Date.now() - new Date(ts).getTime();
+      if (diff < 0) return "刚刚";
+      var mins = Math.floor(diff / 60000);
+      if (mins < 1) return "刚刚";
+      if (mins < 60) return mins + "分钟前";
+      var hours = Math.floor(mins / 60);
+      if (hours < 24) return hours + "小时前";
+      var days = Math.floor(hours / 24);
+      return days + "天前";
+    }
+
+    body.innerHTML = accounts.map((a, idx) => {
+      const aid = a.account_id || "";
+      const aidShort = aid.length > 12 ? aid.slice(0, 12) + "..." : aid;
+      const email = a.email || "-";
+      const emailUser = email.split("@")[0];
+      const emailDomain = email.split("@")[1] || "";
+      const st = a.status || "";
+      return `<tr style="cursor:pointer;border-left:2px solid ${st === 'active' ? 'var(--ok)' : st === 'invalid' ? 'var(--err)' : st === 'cooldown' ? 'var(--warn)' : 'transparent'};" data-aid="${aid}" data-status="${st}">
+        <td style="white-space:nowrap;"><input class="account-selector" type="checkbox" value="${aid}" style="cursor:pointer;" /></td>
+        <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${email}">
+          ${highlight(emailUser)}<span class="muted">@${emailDomain}</span>
+          <button class="copy-btn" onclick="event.stopPropagation();copyText('${email}', this)" title="复制邮箱">&#x2398;</button>
+        </td>
+        <td class="mono" title="${aid}" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;font-size:0.82rem;opacity:0.85;">
+          ${highlight(aidShort)}
+          <button class="copy-btn" onclick="event.stopPropagation();copyText('${aid}', this)" title="复制ID">&#x2398;</button>
+        </td>
+        <td>${statusTag(a.status)}</td>
+        <td class="mono" style="font-size:0.80rem;" title="${a.last_success_at || ''}">${relativeTime(a.last_success_at)}</td>
+        <td class="mono" style="font-size:0.80rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--err);opacity:0.85;" title="${a.last_error || ""}" onmouseenter="this.style.whiteSpace='normal';this.style.overflow='visible';" onmouseleave="this.style.whiteSpace='nowrap';this.style.overflow='hidden';">${a.last_error || "-"}</td>
+        <td style="white-space:nowrap;">
+          <button class="btn btn-sm" onclick="event.stopPropagation();refreshAccount(${JSON.stringify(aid)})">刷新</button>
+          <button class="btn btn-sm err" onclick="event.stopPropagation();deleteOneAccount(${JSON.stringify(aid)})" style="margin-left:4px;">删除</button>
+        </td>
+      </tr>`;
+    }).join("");
+    body.classList.remove("table-fade-in");
+    void body.offsetWidth;
+    body.classList.add("table-fade-in");
+  }
+
+  var debouncedFilter = typeof debounce === "function" ? debounce(filterAccounts, 200) : filterAccounts;
+
+  function filterAccounts() {
+    const q = document.getElementById("searchInput").value.toLowerCase();
+    const filtered = getSortedFiltered();
+    renderTable(filtered);
+    var total = allAccounts.length;
+    var showing = filtered.length;
+    if (q || currentStatusFilter !== "all") {
+      var parts = [];
+      if (currentStatusFilter !== "all") parts.push(currentStatusFilter);
+      if (q) parts.push("搜索");
+      document.getElementById("accountCount").textContent = `显示 ${showing} / ${total}  (${parts.join(" + ")})`;
+    } else {
+      document.getElementById("accountCount").textContent = `共 ${total} 个账号`;
     }
   }
 
   async function loadAccounts() {
-    const data = await api("/api/accounts");
-    const body = document.getElementById("accountsBody");
-    document.getElementById("selectAll").checked = false;
+    try {
+      const data = await api("/api/accounts");
+      allAccounts = data.accounts || [];
 
-    if (!data.accounts.length) {
-      body.innerHTML = `<tr><td colspan="7" class="muted">暂无账号</td></tr>`;
-      return;
+      let active = 0, invalid = 0, cooldown = 0;
+      allAccounts.forEach(a => {
+        if (a.status === "active") active++;
+        else if (a.status === "invalid") invalid++;
+        else if (a.status === "cooldown") cooldown++;
+      });
+      document.getElementById("activeBadge").textContent = `${active} 活跃`;
+      document.getElementById("invalidBadge").textContent = `${invalid} 失效`;
+      document.getElementById("cooldownBadge").textContent = `${cooldown} 冷却`;
+
+      /* Update filter pill counts */
+      var pillData = [
+        { filter: "all", label: "全部", count: allAccounts.length },
+        { filter: "active", label: "活跃", count: active },
+        { filter: "invalid", label: "失效", count: invalid },
+        { filter: "cooldown", label: "冷却", count: cooldown }
+      ];
+      document.querySelectorAll(".filter-pill").forEach(function(p) {
+        var info = pillData.find(function(d) { return d.filter === p.dataset.filter; });
+        if (info) p.innerHTML = info.label + ' <span class="pill-count">' + info.count + '</span>';
+        p.classList.toggle('active', p.dataset.filter === currentStatusFilter);
+      });
+      document.title = `(${active}) 账号池 - OpenAI Register Ops`;
+
+      filterAccounts();
+
+      /* Flash rows with changed status */
+      var changedIds = [];
+      allAccounts.forEach(function(a) {
+        var prev = previousStatuses[a.account_id];
+        if (prev !== undefined && prev !== a.status) changedIds.push(a.account_id);
+        previousStatuses[a.account_id] = a.status;
+      });
+      if (changedIds.length) {
+        setTimeout(function() {
+          changedIds.forEach(function(id) {
+            var row = document.querySelector('tr[data-aid="' + id + '"]');
+            if (row) { row.classList.add("status-changed"); setTimeout(function() { row.classList.remove("status-changed"); }, 1500); }
+          });
+        }, 100);
+      }
+
+      document.getElementById("lastRefresh").textContent = "更新于 " + new Date().toLocaleTimeString("zh-CN", { hour12: false });
+    } catch (err) {
+      console.error("loadAccounts error:", err);
     }
-
-    body.innerHTML = data.accounts.map((a) => {
-      const accountIdLiteral = JSON.stringify(a.account_id || "");
-      return `
-      <tr>
-        <td><input class="account-selector" type="checkbox" value="${a.account_id || ""}" /></td>
-        <td>${a.email || "-"}</td>
-        <td class="mono">${a.account_id || "-"}</td>
-        <td>${statusTag(a.status)}</td>
-        <td class="mono">${a.last_success_at || "-"}</td>
-        <td class="mono">${a.last_error || "-"}</td>
-        <td style="display:flex;gap:6px;flex-wrap:wrap;">
-          <button class="btn" onclick='refreshAccount(${accountIdLiteral})'>刷新</button>
-          <button class="btn err" onclick='deleteOneAccount(${accountIdLiteral})'>删除</button>
-        </td>
-      </tr>`;
-    }).join("");
   }
 
   loadAccounts();
   setInterval(loadAccounts, 20000);
+
+  /* Event delegation for row clicks and checkbox changes */
+  document.getElementById("accountsBody").addEventListener("click", function(e) {
+    var tr = e.target.closest("tr[data-aid]");
+    if (!tr) return;
+    if (e.target.closest("button") || e.target.closest("label")) return;
+    if (e.target.classList.contains("account-selector") || e.target.type === "checkbox") {
+      updateSelectedCount();
+      return;
+    }
+    showAccountDetail(tr.dataset.aid);
+  });
 </script>
 {% endblock %}

@@ -1,39 +1,306 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
 {% block content %}
-<section class="panel">
-  <h3 style="margin-top:0;">最近日志 (最多1000条保留)</h3>
-  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
-    <button class="btn" onclick="loadLogs()">刷新</button>
-    <button class="btn" onclick="setLimit(100)">100</button>
-    <button class="btn" onclick="setLimit(300)">300</button>
-    <button class="btn" onclick="setLimit(800)">800</button>
+<section class="panel animate-in">
+  <div class="panel-header">
+    <h3>事件日志</h3>
+    <span class="muted mono" style="font-size:0.75rem;">最多保留 1000 条</span>
   </div>
-  <pre class="mono" id="logs">loading...</pre>
+
+  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px;">
+    <button class="btn btn-sm" onclick="loadLogs()">
+      <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="vertical-align:-1px;margin-right:2px;"><path d="M1 7a6 6 0 1 1 2-4.5"/><path d="M1 1v6h6"/></svg>
+      刷新
+    </button>
+    <div class="sep"></div>
+    <button class="btn btn-sm active" data-limit="200" onclick="setLimit(200, this)">200</button>
+    <button class="btn btn-sm" data-limit="100" onclick="setLimit(100, this)">100</button>
+    <button class="btn btn-sm" data-limit="300" onclick="setLimit(300, this)">300</button>
+    <button class="btn btn-sm" data-limit="800" onclick="setLimit(800, this)">800</button>
+    <div class="sep"></div>
+    <div class="filter-pills" id="logLevelFilters">
+      <button class="log-pill active" data-level="all" onclick="setLogLevel('all', this)">ALL</button>
+      <button class="log-pill" data-level="error" onclick="setLogLevel('error', this)">ERR <span class="pill-count" id="logCountErr">0</span></button>
+      <button class="log-pill" data-level="warn" onclick="setLogLevel('warn', this)">WRN <span class="pill-count" id="logCountWrn">0</span></button>
+      <button class="log-pill" data-level="ok" onclick="setLogLevel('ok', this)">OK <span class="pill-count" id="logCountOk">0</span></button>
+      <button class="log-pill" data-level="info" onclick="setLogLevel('info', this)">INF <span class="pill-count" id="logCountInf">0</span></button>
+    </div>
+    <div class="sep"></div>
+    <div class="search-box" style="max-width:220px;">
+      <input id="logFilter" type="search" placeholder="过滤日志... (按 / 聚焦)" oninput="debouncedLogFilter()" />
+    </div>
+    <span class="muted mono" style="font-size:0.75rem;margin-left:auto;" id="logCount"></span>
+  </div>
+
+  <div id="logs" style="max-height:620px;overflow:auto;position:relative;"></div>
 </section>
+
+<!-- Scroll to bottom button -->
+<button class="scroll-top-btn" id="scrollBottomBtn" onclick="scrollLogsToBottom()" title="滚动到底部" style="bottom:80px;right:28px;">
+  <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 5l5 5 5-5"/></svg>
+</button>
+
+<style>
+  .log-entry {
+    display: flex;
+    gap: 10px;
+    padding: 6px 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    font-size: 0.82rem;
+    align-items: baseline;
+    transition: background 150ms ease;
+    border-radius: 4px;
+  }
+  .log-entry:hover {
+    background: rgba(255, 255, 255, 0.025);
+  }
+  .log-time {
+    flex-shrink: 0;
+    width: 140px;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.76rem;
+    color: var(--muted);
+    opacity: 0.7;
+  }
+  .log-level {
+    flex-shrink: 0;
+    width: 32px;
+    height: 18px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.65rem;
+    font-weight: 700;
+    font-family: "IBM Plex Mono", monospace;
+    border-radius: 4px;
+    letter-spacing: 0.04em;
+  }
+  .log-event {
+    flex-shrink: 0;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.72rem;
+    color: var(--muted);
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    opacity: 0.65;
+  }
+  .log-msg {
+    flex: 1;
+    word-break: break-all;
+    line-height: 1.5;
+  }
+  .log-msg mark {
+    background: rgba(75, 226, 255, 0.25);
+    color: var(--text);
+    border-radius: 2px;
+    padding: 0 1px;
+  }
+  .log-day-sep {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 8px 4px;
+    font-size: 0.72rem;
+    color: var(--muted);
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    opacity: 0.5;
+  }
+  .log-day-sep::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--line);
+  }
+</style>
 
 <script>
   let currentLimit = 200;
+  let allLogs = [];
+  let currentLogLevel = "all";
 
-  function setLimit(n) {
+  function setLimit(n, btn) {
     currentLimit = n;
+    document.querySelectorAll("[data-limit]").forEach(b => {
+      b.classList.remove("active");
+    });
+    if (btn) btn.classList.add("active");
     loadLogs();
   }
 
-  async function api(url) {
-    const res = await fetch(url);
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(text || `HTTP ${res.status}`);
+  function setLogLevel(level, btn) {
+    currentLogLevel = level;
+    document.querySelectorAll(".log-pill").forEach(p => p.classList.remove("active"));
+    if (btn) btn.classList.add("active");
+    applyFilter();
+  }
+
+  function api(url) {
+    return fetch(url).then(async res => {
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `HTTP ${res.status}`);
+      }
+      return res.json();
+    });
+  }
+
+  function formatTime(ts) {
+    if (!ts) return "";
+    const d = new Date(ts);
+    if (isNaN(d)) return ts;
+    return d.toLocaleString("zh-CN", { hour12: false });
+  }
+
+  function getDateKey(ts) {
+    if (!ts) return "";
+    const d = new Date(ts);
+    if (isNaN(d)) return "";
+    return d.toLocaleDateString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" });
+  }
+
+  function getLogLevel(level, text) {
+    const l = (level || "").toLowerCase();
+    const lower = (text || "").toLowerCase();
+    if (l === "error" || lower.includes("error") || lower.includes("fail") || lower.includes("错误"))
+      return "error";
+    if (l === "warn" || lower.includes("warn"))
+      return "warn";
+    if (l === "debug")
+      return "debug";
+    if (lower.includes("success") || lower.includes("完成") || lower.includes("ok"))
+      return "ok";
+    if (lower.includes("refresh") || lower.includes("刷新") || lower.includes("register") || lower.includes("注册"))
+      return "info";
+    return "info";
+  }
+
+  function getLevelDisplay(levelKey) {
+    const map = {
+      error: { color: "var(--err)", label: "ERR", bg: "var(--err-dim)" },
+      warn: { color: "var(--warn)", label: "WRN", bg: "var(--warn-dim)" },
+      debug: { color: "var(--muted)", label: "DBG", bg: "rgba(255,255,255,0.05)" },
+      ok: { color: "var(--ok)", label: "OK", bg: "var(--ok-dim)" },
+      info: { color: "var(--accent)", label: "INF", bg: "var(--accent-dim)" }
+    };
+    return map[levelKey] || map.info;
+  }
+
+  function highlightText(text, query) {
+    if (!query || !text) return text;
+    var lower = text.toLowerCase();
+    var qLower = query.toLowerCase();
+    var result = "";
+    var lastIdx = 0;
+    while (true) {
+      var idx = lower.indexOf(qLower, lastIdx);
+      if (idx === -1) { result += text.substring(lastIdx); break; }
+      result += text.substring(lastIdx, idx) + '<mark>' + text.substring(idx, idx + query.length) + '</mark>';
+      lastIdx = idx + query.length;
     }
-    return res.json();
+    return result;
+  }
+
+  function renderLogs(logs) {
+    const container = document.getElementById("logs");
+    const query = document.getElementById("logFilter").value;
+    document.getElementById("logCount").textContent = `${logs.length} 条`;
+    if (!logs.length) {
+      container.innerHTML = '<div class="muted" style="padding:40px;text-align:center;"><div style="font-size:2rem;margin-bottom:8px;opacity:0.2;">📋</div>暂无日志</div>';
+      return;
+    }
+
+    /* Count levels */
+    var counts = { error: 0, warn: 0, ok: 0, info: 0, debug: 0 };
+    logs.forEach(ev => {
+      var text = ev.message || ev.msg || JSON.stringify(ev);
+      var lvl = getLogLevel(ev.level, text);
+      if (counts[lvl] !== undefined) counts[lvl]++;
+    });
+    document.getElementById("logCountErr").textContent = counts.error;
+    document.getElementById("logCountWrn").textContent = counts.warn;
+    document.getElementById("logCountOk").textContent = counts.ok;
+    document.getElementById("logCountInf").textContent = counts.info + counts.debug;
+
+    var lastDateKey = "";
+    container.innerHTML = logs.slice().reverse().map(ev => {
+      const text = ev.message || ev.msg || JSON.stringify(ev);
+      const time = ev.ts || ev.time || ev.timestamp || "";
+      const event = ev.event || "";
+      const levelKey = getLogLevel(ev.level, text);
+      const { color, label, bg } = getLevelDisplay(levelKey);
+      const dateKey = getDateKey(time);
+      var daySep = "";
+      if (dateKey && dateKey !== lastDateKey) {
+        lastDateKey = dateKey;
+        daySep = `<div class="log-day-sep">${dateKey}</div>`;
+      }
+      return daySep + `<div class="log-entry">
+        <span class="log-time">${formatTime(time)}</span>
+        <span class="log-level" style="color:${color};background:${bg};">${label}</span>
+        ${event ? `<span class="log-event" title="${event}">${event}</span>` : ""}
+        <span class="log-msg" style="color:${color};">${highlightText(text, query)}</span>
+      </div>`;
+    }).join("");
+  }
+
+  var debouncedLogFilter = typeof debounce === "function" ? debounce(applyFilter, 200) : applyFilter;
+
+  function applyFilter() {
+    const q = document.getElementById("logFilter").value.toLowerCase();
+    let filtered = allLogs;
+
+    /* Level filter */
+    if (currentLogLevel !== "all") {
+      filtered = filtered.filter(ev => {
+        const text = ev.message || ev.msg || JSON.stringify(ev);
+        return getLogLevel(ev.level, text) === currentLogLevel;
+      });
+    }
+
+    /* Text filter */
+    if (q) {
+      filtered = filtered.filter(ev => {
+        const text = JSON.stringify(ev).toLowerCase();
+        return text.includes(q);
+      });
+    }
+
+    renderLogs(filtered);
+  }
+
+  function scrollLogsToBottom() {
+    var el = document.getElementById("logs");
+    if (el) el.scrollTop = el.scrollHeight;
   }
 
   async function loadLogs() {
-    const data = await api(`/api/logs?limit=${currentLimit}`);
-    document.getElementById("logs").textContent = JSON.stringify(data.logs, null, 2);
+    try {
+      const data = await api(`/api/logs?limit=${currentLimit}`);
+      allLogs = data.logs || [];
+      applyFilter();
+      document.getElementById("lastRefresh").textContent = "更新于 " + new Date().toLocaleTimeString("zh-CN", { hour12: false });
+    } catch (err) {
+      console.error("loadLogs error:", err);
+    }
   }
 
   loadLogs();
   setInterval(loadLogs, 15000);
+
+  /* Show/hide scroll-to-bottom button based on scroll position */
+  (function() {
+    var logsEl = document.getElementById("logs");
+    var btn = document.getElementById("scrollBottomBtn");
+    if (!logsEl || !btn) return;
+    function checkScroll() {
+      var atBottom = logsEl.scrollHeight - logsEl.scrollTop - logsEl.clientHeight < 60;
+      btn.classList.toggle("visible", !atBottom);
+    }
+    logsEl.addEventListener("scroll", checkScroll, { passive: true });
+    checkScroll();
+  })();
 </script>
 {% endblock %}
